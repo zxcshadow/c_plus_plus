@@ -1,159 +1,197 @@
+// filemanager.cpp : Этот файл содержит функцию "main". Здесь начинается и заканчивается выполнение программы.
+//
 #include <iostream>
 #include <stdio.h>
-#include <Windows.h>
 #include <conio.h>
-#include <math.h>
+#include <string>
+#include <Windows.h>
+#include <process.h>
+#include <filesystem>
+
 using namespace std;
 
-HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+namespace fs = std::filesystem;
 
-//enum class color : unsigned short
-//{
-//	black, blue, green, cyan, red, magenta, brown, yellow, white
-//};
+int curs = 0; //текущая выбранная строка - курсор
+int last_el = 0; //последний элемент в каталоге, нужен для корректной работы курсора
+HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+fs::path current_path = "C:\\"; //выбранная директория
 
-
-FILE* file;
-char* namefile = NULL;
-int fileSize = 0;
-
-long int numByte[256];
-
-double limit = 0;
-int viewByte = 0;
-int allByte = 0;
-
-void ChangeCoord(int, int);
-void ChangeWindow(int, int);
-void ChangeBufer(int a, int b);
-
-//считывание
-void readFile()
+//функция для ввода параметра
+string set_param()
 {
-	fopen_s(&file, namefile, "rb");
-	for (int i = 0; i < 256; i++)
-	{
-		numByte[i] = 0;
-	}
-	fseek(file, 0, 2);
-	fileSize = ftell(file);
-	fseek(file, 0, 0);
-	unsigned char oneByte;
-	for (int i = 0; i < fileSize; i++){
-		fread_s(&oneByte, 1, 1, 1, file);
-		numByte[int(oneByte)] += 1;
-		allByte += 1;
-	}
-	fclose(file);
+	string buf;
+	cout << "Задайте параметр для приложения: " << endl;
+	getline(cin, buf);
+	return buf;
 }
 
-//создаем таблицу
-void creatTable() 
+//переход по папкам и запуск файлов
+void enter_folder_or_open_file()
 {
-	ChangeBufer(6 * 18 + 3, 51);
-	ChangeWindow(6 * 18 + 3, 51);
-
-	SetConsoleTextAttribute(hStdOut, FOREGROUND_BLUE | FOREGROUND_RED);
-	for (int i = 0; i < 10; i++)
-		cout << "      " << i;
-	for (int i = 0; i < 6; i++)
-		cout << "      " << char(int('A') + i);
-	for (int i = 0; i < 10; i++)
-		cout << '\n' << '\n' << '\n' << i;
-	for (int i = 0; i < 6; i++)
-		cout << '\n' << '\n' << '\n' << char(int('A') + i);
-
-	SetConsoleTextAttribute(hStdOut, FOREGROUND_BLUE);
-	ChangeCoord(0, 1);
-	for (int i = 0; i < 6 * 18 + 3; i++) cout << '_';
-	for (int i = 0; i < 52; i++)
+	int count = 0;
+	for (auto& p : fs::directory_iterator(current_path))
 	{
-		ChangeCoord(2, i);
-		cout << '|';
-	}
-	for (int i = 0; i < 6 * 18 + 3; i++)
-	{
-		ChangeCoord(i, 50);
-		cout << '_';
-	}
-	for (int i = 0; i < 52; i++)
-	{
-		ChangeCoord(114, i);
-		cout << '|';
-	}
+		if (curs == count) //находим строку на которую показывает курсор
+		{
+			if (p.path().extension() == ".exe") //если выбранный файл exe, делаем это
+			{
+				//p.path().string() - берём полное расположение файла
+				//ставим пробел
+				//set_param() прибавляем параметр запуска
+				string buf = p.path().string() + " " + set_param();
+				char file_exe[2048]; //буферная переменная для передачи в функцию exe + параметр
+				strcpy_s(file_exe, buf.c_str()); //копируем из string в char
 
-	SetConsoleTextAttribute(hStdOut, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED);
-}
+				//создаём переменные необходимые для запуска стороннего exe
+				//
+				//определить оконный терминал
+				//инф о недавном созданном процессе и его первичном потоке
+				STARTUPINFOA si;
+				PROCESS_INFORMATION pi;
 
-//заполняем таблицу
-void fillTable()
-{
-	for (int i = 0; i < 256; i++){
-		int x = i % 16;
-		int y = i / 16;
-		ChangeCoord(6 + 7 * x, 3 + 3 * y);
+				RtlZeroMemory(&si, sizeof(si));
+				si.cb = sizeof(si);
+				RtlZeroMemory(&pi, sizeof(pi));
 
-		double prec = ((double)numByte[i] / allByte) * 100;
-		prec = round(prec * 100) / 100;
+				//создаём процесс exe + параметр
+				if (!CreateProcessA(NULL, file_exe, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+					cout << "///Открываю EXE///" << endl;
 
-		if (prec > limit && prec != 0) SetConsoleTextAttribute(hStdOut, FOREGROUND_GREEN); //лимит
-		if (viewByte % 2 == 0) cout << numByte[i];
-		else{
-			cout << prec << '%';
+				//ждём пока процесс закончит своё выполнение
+				WaitForSingleObject(pi.hProcess, INFINITE);
+
+				//прибераемся за процессом
+				CloseHandle(pi.hProcess);
+				CloseHandle(pi.hThread);
+
+				system("pause");
+
+			}
+			else if (p.path().extension() == "") //если выбранна папка
+			{
+				current_path = p.path(); //присваеваем выбранной директории новое значение выбранной папки
+				curs = 0; //обнуляем курсор
+				last_el = 0;
+			}
+			else
+			{
+				SetConsoleTextAttribute(hConsole, FOREGROUND_RED);
+				cout << "Я пока не умею открывать данный тип файлов :(" << endl;
+				system("pause");
+			}
+			return;
 		}
-		SetConsoleTextAttribute(hStdOut, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED);
+		count++;
 	}
 }
 
-void ChangeWindow(int a, int b) {
-	COORD crd = { a, b };
-	SMALL_RECT src = { 0, 0, crd.X, crd.Y };
-	SetConsoleWindowInfo(hStdOut, true, &src);
-}
-
-void ChangeBufer(int a, int b){
-	COORD crd = { a, b };
-	SetConsoleScreenBufferSize(hStdOut, crd);
-}
-
-void GetLimit(char* argv){
-	int lenLim = strlen(argv);
-	switch (lenLim)
-	{
-	case 1:
-		limit = int(argv[0]) - int('0');
-		break;
-	case 2:
-		limit = (int(argv[0]) - int('0')) * 10 + (int(argv[1]) - int('0'));
-		break;
-	case 4:
-		limit = int(argv[0]) - int('0') + double(argv[2] - int('0')) / 10 + double(argv[3] - int('0')) / 100;
-		break;
-	case 5:
-		limit = (int(argv[0]) - int('0')) * 10 + (int(argv[1]) - int('0')) + double(argv[3] - int('0')) / 10 + double(argv[4] - int('0')) / 100;
-	}
-}
-
-void ChangeCoord(int x, int y){
-	COORD pos = { x, y };
-	SetConsoleCursorPosition(hStdOut, pos);
-}
-
-int main(int argc, char* argv[])
+//печать содержимого каталога
+void print_struct_folder()
 {
-	setlocale(0, "");
-	system("cls");
-	namefile = argv[1];
-	GetLimit(argv[2]);
-	readFile();
-	int code;
-	do
+	int count = 0; //счётчик
+
+	//не рекурсивный проход каталога
+	for (auto& p : fs::directory_iterator(current_path))
 	{
-		creatTable();
-		fillTable();
-		code = _getch();
+		if (curs == count)
+		{
+			//выделяем цветом строку на которую указывает курсор
+			SetConsoleTextAttribute(hConsole, 63);
+			cout << count << " " << p.path() << endl;
+			SetConsoleTextAttribute(hConsole, 7);
+		}
+		else
+		{
+			cout << count << " " << p.path() << endl;
+		}
+
+		count++;
+	}
+	last_el = count - 1;
+	//cout << curs << endl;
+}
+
+//печать первых двух строк - навигация
+void print_navigation()
+{
+	//выделяем дветом строку навигации
+	SetConsoleTextAttribute(hConsole, 2);
+	cout << current_path << endl;
+	SetConsoleTextAttribute(hConsole, 7);
+
+	//отображение возвращения в предыдущую папку
+	if (current_path != current_path.parent_path())
+		cout << "<- (Esc)" << endl;
+	else
+		cout << "Root folder!" << endl;
+	SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_RED);
+	cout << "передвижение вверх - стрелочка верх " << endl;
+	cout << "передвижение вниз - стрелочка вниз " << endl;
+	SetConsoleTextAttribute(hConsole, 7);
+	cout << "_______________________________________ " << endl;
+}
+
+//функция перехода к предыдущему каталогу
+void up_folder()
+{
+	string buf = "";
+	if (current_path != current_path.parent_path()) // если мы не в коренном каталоге
+	{
+		string s(current_path.string()); //присваиваем строке текущее расположение
+		s.resize(s.rfind("\\")); //обрезаем строку вместе с первым встречающимся с конца "\\"
+
+		if (s.size() == 2) //для коректного возвращения в корневой каталог "C:\\"
+			s += "\\";
+
+		current_path = s; //возвращаем новое значение директории
+	}
+}
+
+//главная функция
+void main()
+{
+	setlocale(LC_ALL, "RUS"); //русификация
+
+	while (true)
+	{
+		print_navigation(); //печатаем первые две строки, которые помогут нам ориентироваться в файловой системе
+		print_struct_folder(); //печатаем файлы и папки которые есть в каталоге
+
+		switch (_getch())//в зависимости от нажатой клавиши управляем программой
+		{
+		case 72: //вверх
+			if (curs > 0)
+				curs--;
+			else
+				curs = last_el;
+
+			break;
+
+		case 80: //вниз
+			if (curs < last_el)
+				curs++;
+			else
+				curs = 0;
+
+			break;
+
+		case 13: //enter
+			enter_folder_or_open_file(); //открыть выбранный каталог/файл
+
+			break;
+
+		case 27: //esc (назад)
+			up_folder(); //возвращаемся на один каталог обратно
+
+			break;
+
+		default:
+			break;
+		}
+
 		system("cls");
-		if (code == int('1')) viewByte += 1;
-	} while (code != 13);
-	return 0;
+	}
+
+	system("pause");
 }
